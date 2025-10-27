@@ -130,7 +130,7 @@ void convolution_parallel_2(double **A, double K[3][3], double **B, int Asize, i
     int pad = ksize / 2;
     int block = 128; 
 
-    #pragma omp parallel for collapse(2) schedule(dynamic)
+    #pragma omp parallel for collapse(2) schedule(dynamic) num_threads(10)
     for (int bi = 0; bi < Asize; bi += block) {
         for (int bj = 0; bj < Asize; bj += block) {
             for (int i = bi; i < bi + block && i < Asize; ++i) {
