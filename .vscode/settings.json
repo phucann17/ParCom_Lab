@@ -50,5 +50,6 @@
         "streambuf": "cpp",
         "thread": "cpp",
         "typeinfo": "cpp"
-    }
+    },
+    "idf.pythonInstallPath": "D:\\Embedded\\ESP32\\Espressif\\tools\\idf-python\\3.11.2\\python.exe"
 }
