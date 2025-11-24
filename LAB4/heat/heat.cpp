@@ -176,7 +176,7 @@ int main(int argc, char** argv){
 
     convolution_MPI_OpenMP_sync(local_A, kernel, local_C, chunk, 3, N, world_rank, world_size);
 
-    MPI_Barrier(MPI_COMM_WORLD);
+    // MPI_Barrier(MPI_COMM_WORLD);
     double s1 = MPI_Wtime();
 
     if (world_rank == 0) printf("Parallel PDE time: %.6f seconds\n", s1 - s0);
