@@ -90,7 +90,7 @@ void sequential_PDE(double* A, double* Cnew,
                 double decay = (lambda + k) * current;
 
                 // PDE update
-                Cnew[idx] = current + dt * (-adv_x - adv_y + diffusion - decay);
+                Cnew[idx] = current + dt * (diffusion - decay - adv_x - adv_y);
             }
         }
 
@@ -98,6 +98,11 @@ void sequential_PDE(double* A, double* Cnew,
         for (int i = 0; i < n * n; i++) {
             A[i] = Cnew[i];
         }
+        // int global_clean = 0;
+        // for (int i = 0; i < n * n; i++) {
+        //     if (A[i] <= 0) global_clean++;
+        // }
+        // printf("Iteration %d: Clean cells = %d\n", t, global_clean);
     }
 }
 
@@ -167,9 +172,15 @@ void parallel_PDE_sync(double* local_A, double* local_C, unsigned int rows, int 
         // BARRIER 
         MPI_Barrier(MPI_COMM_WORLD);
         // REDUCE
+        int actual_rows = (world_rank == world_size - 1) ? N - world_rank*rows : rows;
+
         int local_clean = 0;
-        for (int i = 0; i < rows * N; i++)
-            if (local_A[i] <= 0.0) local_clean++;
+        for (int i = 0; i < actual_rows; ++i) {
+            for (int j = 0; j < N; ++j) {
+                int idx = i * N + j;
+                if (local_A[idx] <= 0.0) ++local_clean;
+            }
+        }
 
         int global_clean = 0;
         MPI_Reduce(&local_clean, &global_clean, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -265,9 +276,15 @@ void parallel_PDE_async(double* local_A, double* local_C, unsigned int rows, int
             local_A[i] = local_C[i];
         } 
 
+        int actual_rows = (world_rank == world_size - 1) ? N - world_rank*rows : rows;
+
         int local_clean = 0;
-        for (int i = 0; i < rows * N; i++)
-            if (local_A[i] <= 0.0) local_clean++;
+        for (int i = 0; i < actual_rows; ++i) {
+            for (int j = 0; j < N; ++j) {
+                int idx = i * N + j;
+                if (local_A[idx] <= 0.0) ++local_clean;
+            }
+        }
 
         int global_clean = 0;
         MPI_Reduce(&local_clean, &global_clean, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);

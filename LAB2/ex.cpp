@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <algorithm>
 
-
+#define Num 4000
 void read_file(const char* filename, double* m, unsigned int n) {
     FILE* fd = fopen(filename, "r");
     if (!fd) {
@@ -95,7 +95,7 @@ void sequential_PDE(double* A, double* Cnew,
                 double decay = (lambda + k) * current;
 
                 // PDE update
-                Cnew[idx] = current + dt * (-adv_x - adv_y + diffusion - decay);
+                Cnew[idx] = current + dt * (diffusion - decay - adv_x - adv_y);
             }
         }
 
@@ -103,6 +103,11 @@ void sequential_PDE(double* A, double* Cnew,
         for (int i = 0; i < n * n; i++) {
             A[i] = Cnew[i];
         }
+        // int global_clean = 0;
+        // for (int i = 0; i < n * n; i++) {
+        //     if (A[i] <= 0) global_clean++;
+        // }
+        // printf("Iteration %d: Clean cells = %d\n", t, global_clean);
     }
 }
 
@@ -155,10 +160,10 @@ void parallel_PDE(double* local_A, double* local_C, unsigned int rows, int N, in
                 double right = (j < N - 1) ? local_A[i * N + (j + 1)] : 0.0;
 
                 double laplace = (down - 2.0 * current + up) / (dx * dx)  
-                            + (right - 2.0 * current + left) / (dy * dy); 
+                            + (right - 2.0 * current + left) / (dy * dy);
 
                 // --- Update ---
-                local_C[idx] = current + dt * (-adv_x - adv_y + D * laplace - (lambda + k) * current);
+                local_C[idx] = current + dt * (D * laplace - (lambda + k) * current - adv_x - adv_y);
             }
         }
 
@@ -171,15 +176,21 @@ void parallel_PDE(double* local_A, double* local_C, unsigned int rows, int N, in
         MPI_Barrier(MPI_COMM_WORLD);
 
         // REDUCE
+        int actual_rows = (world_rank == world_size - 1) ? N - world_rank*rows : rows;
+
         int local_clean = 0;
-        for (int i = 0; i < rows * N; i++)
-            if (local_A[i] <= 0.0) local_clean++;
+        for (int i = 0; i < actual_rows; ++i) {
+            for (int j = 0; j < N; ++j) {
+                int idx = i * N + j;
+                if (local_A[idx] <= 0.0) ++local_clean;
+            }
+        }
 
         int global_clean = 0;
         MPI_Reduce(&local_clean, &global_clean, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
 
         if (world_rank == 0) {
-            // printf("Iteration %d: Clean cells = %d\n", t, global_clean);
+            printf("Iteration %d: Clean cells = %d\n", t, global_clean);
         }
     }
 
@@ -225,7 +236,7 @@ int main(int argc, char** argv) {
         A_mpi = (double*)calloc(padded * N, sizeof(double)); // padding = 0
         Cseq = (double*)malloc(N * N * sizeof(double));
         CnewPar = (double*)malloc(padded * N * sizeof(double));
-        printf("Reading file radioactive_matrix.csv ...\n");
+        printf("Starting reading radioactive_matrix.csv\n");
         double t0 = MPI_Wtime();
         read_file("radioactive_matrix.csv", A, N);
         double t1 = MPI_Wtime();
@@ -238,6 +249,7 @@ int main(int argc, char** argv) {
         t0 = MPI_Wtime();
         sequential_PDE(A, Cseq, N, T, D, k, lambda, ux, uy, dt, dx, dy);
         t1 = MPI_Wtime();
+        printf("Starting sequential simulation:\n");
         printf("Sequential PDE time: %.6f seconds\n", t1 - t0);
         free(A);
     }
@@ -251,7 +263,7 @@ int main(int argc, char** argv) {
     MPI_Scatter((world_rank == 0 ? A_mpi : nullptr), chunk * N, MPI_DOUBLE, local_A, chunk * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 
-    if (world_rank == 0) printf("Starting parallel simulation...\n");
+    if (world_rank == 0) printf("Starting parallel simulation:\n");
 
     MPI_Barrier(MPI_COMM_WORLD);
     double s0 = MPI_Wtime();
@@ -270,7 +282,7 @@ int main(int argc, char** argv) {
         s0 = MPI_Wtime();
         check_matrix_equal(Cseq, CnewPar, N * N);
         s1 = MPI_Wtime();
-        printf("Check is valid seq and parallel in .%6f seconds\n", s1 - s0);
+        printf("Check valid seq and parallel in %6f seconds\n", s1 - s0);
         free(A_mpi);
         free(Cseq);
         free(CnewPar);

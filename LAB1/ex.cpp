@@ -155,6 +155,7 @@ int main(){
         {0.05, 0.1, 0.05}
     };
 
+    printf("Starting reading heat_matrix.csv\n");
     double s0 = omp_get_wtime();
     read_file("heat_matrix.csv", A, N);
     double s1 = omp_get_wtime();
@@ -177,7 +178,9 @@ int main(){
 
 
     s0 = omp_get_wtime();
+    printf("Check correctness of convolution_seq and convolution_parallel_1: ");
     check_matrix_equal(res, res1, N);
+    printf("Check correctness of convolution_seq and convolution_parallel_2: ");
     check_matrix_equal(res, res2, N);
     s1 = omp_get_wtime();
     printf("Time to check: %.6lf seconds\n", s1 - s0);
