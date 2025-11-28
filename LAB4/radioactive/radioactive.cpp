@@ -10,13 +10,13 @@ void read_file(const char* filename, double* m, unsigned int n) {
 
     for (unsigned int i = 0; i < n; ++i) {
         for (unsigned int j = 0; j < n; ++j) {
-            int idx = i * n + j; 
+            int idx = i * n + j;
             int ret = fscanf(fd, "%lf,", &m[idx]);
             if (ret == EOF) {
-                printf("Reached EOF at element [%u][%u]\n", i, j);
+                printf("Reached EOF at element [%u][%u]\n", i, j);        
                 break;
             } else if (ret != 1) {
-                printf("Error reading value at [%u][%u]\n", i, j);
+                printf("Error reading value at [%u][%u]\n", i, j);        
                 break;
             }
         }
@@ -36,7 +36,7 @@ void check_matrix_equal(double* A, double* B, unsigned int n){
             return;
         }
     }
-    
+
     printf("Check matrix equal successfully\n");
 }
 
@@ -69,7 +69,7 @@ void sequential_PDE(double* A, double* Cnew,
         for (int i = 0; i < n; i++) {
             for (int j = 0; j < n; j++) {
 
-                int idx = i * n + j; 
+                int idx = i * n + j;
                 double current = A[idx];
 
                 // Advection (upwind)
@@ -102,7 +102,7 @@ void sequential_PDE(double* A, double* Cnew,
         // for (int i = 0; i < n * n; i++) {
         //     if (A[i] <= 0) global_clean++;
         // }
-        // printf("Iteration %d: Clean cells = %d\n", t, global_clean);
+        // printf("Iteration %d: Clean cells = %d\n", t, global_clean);   
     }
 }
 
@@ -114,81 +114,87 @@ void parallel_PDE_sync(double* local_A, double* local_C, unsigned int rows, int 
                   double dt, double dx, double dy,
                   int world_rank, int world_size)
 {
-    double* lowest_row_above = (double*)malloc(N * sizeof(double));
-    double* highest_row_below = (double*)malloc(N * sizeof(double));
+    double* lowest_row_above = (double*)malloc(N * sizeof(double));       
+    double* highest_row_below = (double*)malloc(N * sizeof(double));      
 
-    for (int t = 0; t < T; t++) {
-        int up_rank = (world_rank == 0) ? MPI_PROC_NULL : world_rank - 1;
-        int down_rank = (world_rank == world_size - 1) ? MPI_PROC_NULL : world_rank + 1;
-       if (world_rank % 2 == 0) {
-            if (up_rank != MPI_PROC_NULL)
-                MPI_Send(local_A, N, MPI_DOUBLE, up_rank, 1, MPI_COMM_WORLD);
-            if (down_rank != MPI_PROC_NULL)
-                MPI_Send(&local_A[(rows-1)*N], N, MPI_DOUBLE, down_rank, 0, MPI_COMM_WORLD);
+    // #pragma omp parallel num_threads(4)
+    // {
+        for (int t = 0; t < T; t++) {
+            int up_rank = (world_rank == 0) ? MPI_PROC_NULL : world_rank - 1; 
+            int down_rank = (world_rank == world_size - 1) ? MPI_PROC_NULL : world_rank + 1;
+            if (world_rank % 2 == 0) {
+                if (up_rank != MPI_PROC_NULL)
+                    MPI_Send(local_A, N, MPI_DOUBLE, up_rank, 1, MPI_COMM_WORLD);
+                if (down_rank != MPI_PROC_NULL)
+                    MPI_Send(&local_A[(rows-1)*N], N, MPI_DOUBLE, down_rank, 0, MPI_COMM_WORLD);
 
-            if (up_rank != MPI_PROC_NULL)
-                MPI_Recv(lowest_row_above, N, MPI_DOUBLE, up_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            if (down_rank != MPI_PROC_NULL)
-                MPI_Recv(highest_row_below, N, MPI_DOUBLE, down_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                if (up_rank != MPI_PROC_NULL)
+                    MPI_Recv(lowest_row_above, N, MPI_DOUBLE, up_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                if (down_rank != MPI_PROC_NULL)
+                    MPI_Recv(highest_row_below, N, MPI_DOUBLE, down_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-        } else { // odd ranks
-            if (up_rank != MPI_PROC_NULL)
-                MPI_Recv(lowest_row_above, N, MPI_DOUBLE, up_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            if (down_rank != MPI_PROC_NULL)
-                MPI_Recv(highest_row_below, N, MPI_DOUBLE, down_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            } else { // odd ranks
+                if (up_rank != MPI_PROC_NULL)
+                    MPI_Recv(lowest_row_above, N, MPI_DOUBLE, up_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                if (down_rank != MPI_PROC_NULL)
+                    MPI_Recv(highest_row_below, N, MPI_DOUBLE, down_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-            if (up_rank != MPI_PROC_NULL)
-                MPI_Send(local_A, N, MPI_DOUBLE, up_rank, 1, MPI_COMM_WORLD);
-            if (down_rank != MPI_PROC_NULL)
-                MPI_Send(&local_A[(rows-1)*N], N, MPI_DOUBLE, down_rank, 0, MPI_COMM_WORLD);
-        }   
-        // PDE UPDATE
-        for (int i = 0; i < rows; i++) {
-            for (int j = 0; j < N; j++) {
-                int idx = i * N + j;
-                double current = local_A[idx];
-                // --- Advection (upwind) ---
-                double adv_x = (i > 0) ? ux * (current - local_A[(i - 1) * N + j]) / dx
-                            : (world_rank == 0 ? (ux * current / dx) : (ux * (current - lowest_row_above[j]) / dx));
-                double adv_y = (j > 0) ? uy * (current - local_A[i * N + (j - 1)]) / dy : uy * current / dy;
-                // --- Diffusion (Laplace) ---
-                double up    = (i > 0) ? local_A[(i - 1) * N + j] 
-                        : (world_rank == 0 ? 0.0 : lowest_row_above[j]);
-                double down  = (i < rows - 1) ? local_A[(i + 1) * N + j] 
-                                            : (world_rank == world_size - 1 ? 0.0 : highest_row_below[j]);
-                double left  = (j > 0) ? local_A[i * N + (j - 1)] : 0.0;
-                double right = (j < N - 1) ? local_A[i * N + (j + 1)] : 0.0;
-
-                double laplace = (down - 2.0 * current + up) / (dx * dx)  
-                            + (right - 2.0 * current + left) / (dy * dy); 
-                // --- Update ---
-                local_C[idx] = current + dt * (-adv_x - adv_y + D * laplace - (lambda + k) * current);
+                if (up_rank != MPI_PROC_NULL)
+                    MPI_Send(local_A, N, MPI_DOUBLE, up_rank, 1, MPI_COMM_WORLD);
+                if (down_rank != MPI_PROC_NULL)
+                    MPI_Send(&local_A[(rows-1)*N], N, MPI_DOUBLE, down_rank, 0, MPI_COMM_WORLD);
             }
-        }
-        // copy C -> A
-        for (int i = 0; i < rows * N; i++){
-            local_A[i] = local_C[i];
-        }  
-        // BARRIER 
-        MPI_Barrier(MPI_COMM_WORLD);
-        // REDUCE
-        int actual_rows = (world_rank == world_size - 1) ? N - world_rank*rows : rows;
+            // PDE UPDATE
+            #pragma omp parallel for schedule(dynamic) num_threads(4)
+            for (int i = 0; i < rows; i++) {
+                // #pragma omp parallel for schedule(dynamic) num_threads(10)
+                for (int j = 0; j < N; j++) {
+                    int idx = i * N + j;
+                    double current = local_A[idx];
+                    // --- Advection (upwind) ---
+                    double adv_x = (i > 0) ? ux * (current - local_A[(i - 1) * N + j]) / dx
+                                : (world_rank == 0 ? (ux * current / dx) : (ux * (current - lowest_row_above[j]) / dx));
+                    double adv_y = (j > 0) ? uy * (current - local_A[i * N + (j - 1)]) / dy : uy * current / dy;
+                    // --- Diffusion (Laplace) ---
+                    double up    = (i > 0) ? local_A[(i - 1) * N + j]
+                            : (world_rank == 0 ? 0.0 : lowest_row_above[j]);  
+                    double down  = (i < rows - 1) ? local_A[(i + 1) * N + j]  
+                                                : (world_rank == world_size - 1 ? 0.0 : highest_row_below[j]);
+                    double left  = (j > 0) ? local_A[i * N + (j - 1)] : 0.0;  
+                    double right = (j < N - 1) ? local_A[i * N + (j + 1)] : 0.0;
 
-        int local_clean = 0;
-        for (int i = 0; i < actual_rows; ++i) {
-            for (int j = 0; j < N; ++j) {
-                int idx = i * N + j;
-                if (local_A[idx] <= 0.0) ++local_clean;
+                    double laplace = (down - 2.0 * current + up) / (dx * dx)  
+                                + (right - 2.0 * current + left) / (dy * dy); 
+                    // --- Update ---
+                    local_C[idx] = current + dt * (D * laplace - (lambda + k) * current - adv_x - adv_y);
+                }
             }
-        }
+            // copy C -> A
+            // #pragma omp for schedule(dynamic)
+            for (int i = 0; i < rows * N; i++){
+                local_A[i] = local_C[i];
+            }
+            // BARRIER
+            MPI_Barrier(MPI_COMM_WORLD);
+            // REDUCE
+            int actual_rows = (world_rank == world_size - 1) ? N - world_rank*rows : rows;
 
-        int global_clean = 0;
-        MPI_Reduce(&local_clean, &global_clean, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+            int local_clean = 0;
+            for (int i = 0; i < actual_rows; ++i) {
+                for (int j = 0; j < N; ++j) {
+                    int idx = i * N + j;
+                    if (local_A[idx] <= 0.0) ++local_clean;
+                }
+            }
 
-        if (world_rank == 0) {
-            // printf("Iteration %d: Clean cells = %d\n", t, global_clean);
+            // int global_clean = 0;
+            // MPI_Reduce(&local_clean, &global_clean, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+
+            // if (world_rank == 0) {
+            //     // printf("Iteration %d: Clean cells = %d\n", t, global_clean);
+            // }
         }
-    }
+    // }
 
     // stop signal
     int stop = 1;
@@ -204,99 +210,102 @@ void parallel_PDE_async(double* local_A, double* local_C, unsigned int rows, int
                         double dt, double dx, double dy,
                         int world_rank, int world_size)
 {
-    double* lowest_row_above = (double*)malloc(N * sizeof(double));
-    double* highest_row_below = (double*)malloc(N * sizeof(double));
+    double* lowest_row_above = (double*)malloc(N * sizeof(double));       
+    double* highest_row_below = (double*)malloc(N * sizeof(double));      
 
-    for (int t = 0; t < T; t++) {
-        int up_rank = (world_rank == 0) ? MPI_PROC_NULL : world_rank - 1;
-        int down_rank = (world_rank == world_size - 1) ? MPI_PROC_NULL : world_rank + 1;
 
-        MPI_Request reqs[4];
-        int req_count = 0;
+        for (int t = 0; t < T; t++) {
+            int up_rank = (world_rank == 0) ? MPI_PROC_NULL : world_rank - 1; 
+            int down_rank = (world_rank == world_size - 1) ? MPI_PROC_NULL : world_rank + 1;
 
-        // Post non-blocking receives first
-        if (up_rank != MPI_PROC_NULL)
-            MPI_Irecv(lowest_row_above, N, MPI_DOUBLE, up_rank, 0, MPI_COMM_WORLD, &reqs[req_count++]);
-        if (down_rank != MPI_PROC_NULL)
-            MPI_Irecv(highest_row_below, N, MPI_DOUBLE, down_rank, 1, MPI_COMM_WORLD, &reqs[req_count++]);
+            MPI_Request reqs[4];
+            int req_count = 0;
 
-        // Post non-blocking sends
-        if (up_rank != MPI_PROC_NULL)
-            MPI_Isend(local_A, N, MPI_DOUBLE, up_rank, 1, MPI_COMM_WORLD, &reqs[req_count++]);
-        if (down_rank != MPI_PROC_NULL)
-            MPI_Isend(&local_A[(rows-1)*N], N, MPI_DOUBLE, down_rank, 0, MPI_COMM_WORLD, &reqs[req_count++]);
+            // Post non-blocking receives first
+            if (up_rank != MPI_PROC_NULL)
+                   MPI_Irecv(lowest_row_above, N, MPI_DOUBLE, up_rank, 0, MPI_COMM_WORLD, &reqs[req_count++]);
+            if (down_rank != MPI_PROC_NULL)
+                   MPI_Irecv(highest_row_below, N, MPI_DOUBLE, down_rank, 1, MPI_COMM_WORLD, &reqs[req_count++]);
 
-        
-        for (int i = 1; i < rows-1; i++) {       // skip first and last row
-            for (int j = 0; j < N; j++) {
-                int idx = i * N + j;
-                double current = local_A[idx];
+            // Post non-blocking sends
+            if (up_rank != MPI_PROC_NULL)
+                   MPI_Isend(local_A, N, MPI_DOUBLE, up_rank, 1, MPI_COMM_WORLD, &reqs[req_count++]);
+            if (down_rank != MPI_PROC_NULL)
+                   MPI_Isend(&local_A[(rows-1)*N], N, MPI_DOUBLE, down_rank, 0, MPI_COMM_WORLD, &reqs[req_count++]);
+            #pragma omp parallel for schedule(dynamic) num_threads(4) 
+            for (int i = 1; i < rows-1; i++) {    
+                // #pragma omp parallel for schedule(dynamic) num_threads(10)   // skip first and last row
+                for (int j = 0; j < N; j++) {
+                    int idx = i * N + j;
+                    double current = local_A[idx];
 
-                // Advection
-                double adv_x = ux * (current - local_A[(i - 1) * N + j]) / dx;
-                double adv_y = (j > 0) ? uy * (current - local_A[i * N + (j - 1)]) / dy : uy * current / dy;
+                    // Advection
+                    double adv_x = ux * (current - local_A[(i - 1) * N + j]) / dx;
+                    double adv_y = (j > 0) ? uy * (current - local_A[i * N + (j - 1)]) / dy : uy * current / dy;
 
-                // Diffusion
-                double up    = local_A[(i - 1) * N + j];
-                double down  = local_A[(i + 1) * N + j];
-                double left  = (j > 0) ? local_A[i * N + (j - 1)] : 0.0;
-                double right = (j < N - 1) ? local_A[i * N + (j + 1)] : 0.0;
-                double laplace = (down - 2.0 * current + up)/(dx*dx) + (right - 2.0*current + left)/(dy*dy);
+                    // Diffusion
+                    double up    = local_A[(i - 1) * N + j];
+                    double down  = local_A[(i + 1) * N + j];
+                    double left  = (j > 0) ? local_A[i * N + (j - 1)] : 0.0;  
+                    double right = (j < N - 1) ? local_A[i * N + (j + 1)] : 0.0;
+                    double laplace = (down - 2.0 * current + up)/(dx*dx) + (right - 2.0*current + left)/(dy*dy);
 
-                local_C[idx] = current + dt * (-adv_x - adv_y + D * laplace - (lambda + k) * current);
+                    local_C[idx] = current + dt * (D * laplace - (lambda + k) * current - adv_x - adv_y);
+                }
             }
-        }
-        // --- Wait for boundary rows ---
-        MPI_Waitall(req_count, reqs, MPI_STATUSES_IGNORE);
-        // --- Compute boundary rows now that we have neighbor data ---
-        for (int i = 0; i < rows; i += (rows-1)) {  // first row and last row
-            for (int j = 0; j < N; j++) {
-                int idx = i * N + j;
-                double current = local_A[idx];
-                // Advection x
-                double adv_x;
-                if (i == 0)
-                    adv_x = (world_rank == 0) ? ux * current / dx : ux * (current - lowest_row_above[j]) / dx;
-                else
-                    adv_x = ux * (current - local_A[(i - 1) * N + j]) / dx;
-                // Advection y
-                double adv_y = (j > 0) ? uy * (current - local_A[i * N + (j - 1)]) / dy : uy * current / dy;
-                // Diffusion
-                double up    = (i > 0) ? local_A[(i - 1) * N + j] : (world_rank == 0 ? 0.0 : lowest_row_above[j]);
-                double down  = (i < rows-1) ? local_A[(i + 1) * N + j] : (world_rank == world_size-1 ? 0.0 : highest_row_below[j]);
-                double left  = (j > 0) ? local_A[i * N + (j - 1)] : 0.0;
-                double right = (j < N-1) ? local_A[i * N + (j + 1)] : 0.0;
-                double laplace = (down - 2.0*current + up)/(dx*dx) + (right - 2.0*current + left)/(dy*dy);
-                local_C[idx] = current + dt * (-adv_x - adv_y + D * laplace - (lambda + k) * current);
+            // --- Wait for boundary rows ---
+            MPI_Waitall(req_count, reqs, MPI_STATUSES_IGNORE);
+            // --- Compute boundary rows now that we have neighbor data ---
+            #pragma omp parallel for schedule(dynamic) num_threads(4)
+            for (int i = 0; i < rows; i += (rows-1)) {  // first row and last row
+                for (int j = 0; j < N; j++) {
+                    int idx = i * N + j;
+                    double current = local_A[idx];
+                    // Advection x
+                    double adv_x;
+                    if (i == 0)
+                        adv_x = (world_rank == 0) ? ux * current / dx : ux * (current - lowest_row_above[j]) / dx;
+                    else
+                        adv_x = ux * (current - local_A[(i - 1) * N + j]) / dx;
+                    // Advection y
+                    double adv_y = (j > 0) ? uy * (current - local_A[i * N + (j - 1)]) / dy : uy * current / dy;
+                    // Diffusion
+                    double up    = (i > 0) ? local_A[(i - 1) * N + j] : (world_rank == 0 ? 0.0 : lowest_row_above[j]);
+                    double down  = (i < rows-1) ? local_A[(i + 1) * N + j] : (world_rank == world_size-1 ? 0.0 : highest_row_below[j]);
+                    double left  = (j > 0) ? local_A[i * N + (j - 1)] : 0.0;  
+                    double right = (j < N-1) ? local_A[i * N + (j + 1)] : 0.0;
+                    double laplace = (down - 2.0*current + up)/(dx*dx) + (right - 2.0*current + left)/(dy*dy);
+                    local_C[idx] = current + dt * (D * laplace - (lambda + k) * current - adv_x - adv_y);
+                }
             }
-        }
 
-        // --- Swap pointers ---
-        for (int i = 0; i < rows * N; i++){
-            local_A[i] = local_C[i];
-        } 
-
-        int actual_rows = (world_rank == world_size - 1) ? N - world_rank*rows : rows;
-
-        int local_clean = 0;
-        for (int i = 0; i < actual_rows; ++i) {
-            for (int j = 0; j < N; ++j) {
-                int idx = i * N + j;
-                if (local_A[idx] <= 0.0) ++local_clean;
+            // --- Swap pointers ---
+            // #pragma omp parallel for schedule(dynamic) num_threads(4)   
+            for (int i = 0; i < rows * N; i++){
+                local_A[i] = local_C[i];
             }
-        }
 
-        int global_clean = 0;
-        MPI_Reduce(&local_clean, &global_clean, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-        if (world_rank == 0) {
-            // printf("Iteration %d: Clean cells = %d\n", t, global_clean);
+            int actual_rows = (world_rank == world_size - 1) ? N - world_rank*rows : rows;
+
+            int local_clean = 0;
+            for (int i = 0; i < actual_rows; ++i) {
+                for (int j = 0; j < N; ++j) {
+                    int idx = i * N + j;
+                    if (local_A[idx] <= 0.0) ++local_clean;
+                }
+            }
+
+            // int global_clean = 0;
+            // MPI_Reduce(&local_clean, &global_clean, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+            // if (world_rank == 0) {
+            //     // printf("Iteration %d: Clean cells = %d\n", t, global_clean);
+            // }
         }
-    }
 
     free(lowest_row_above);
     free(highest_row_below);
 }
-  
+
 int main(int argc, char** argv) {
     unsigned int N = 4000;
     double* A = NULL;
@@ -309,8 +318,9 @@ int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
     int chunk = (N + world_size - 1) / world_size; // ceil(N / world_size)
-    int padded = chunk * world_size;               // padded total rows
+    int padded = chunk * world_size;               // padded total rows   
     // Simulation parameters
     int T = 100;
     double D = 1000.0;
@@ -321,7 +331,7 @@ int main(int argc, char** argv) {
     double uy = 1.4;
     double dx = 10.0;
     double dy = 10.0;
-    
+
     // Allocate full matrix only on rank 0
    if (world_rank == 0) {
         A = (double*)malloc(N * N * sizeof(double));
@@ -339,9 +349,10 @@ int main(int argc, char** argv) {
         }
         printf("Reading finished in %.6f s\n", t1 - t0);
         t0 = MPI_Wtime();
-        sequential_PDE(A, Cseq, N, T, D, k, lambda, ux, uy, dt, dx, dy);
+        sequential_PDE(A, Cseq, N, T, D, k, lambda, ux, uy, dt, dx, dy);  
         t1 = MPI_Wtime();
         printf("Sequential PDE time: %.6f seconds\n", t1 - t0);
+        // printf("World size = %d\n", provided);
         free(A);
     }
     // Allocate local memory for each process
@@ -349,7 +360,7 @@ int main(int argc, char** argv) {
     local_C = (double*)malloc(chunk * N * sizeof(double));
     // Scatter padded matrix rows
     MPI_Scatter((world_rank == 0 ? A_mpi : nullptr), chunk * N, MPI_DOUBLE, local_A, chunk * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    if (world_rank == 0) printf("Starting parallel PDE (sync)!\n");
+    if (world_rank == 0) printf("Starting parallel PDE (sync)!\n");       
     MPI_Barrier(MPI_COMM_WORLD);
     double s0 = MPI_Wtime();
     parallel_PDE_sync(local_A, local_C, chunk, N, T, D, k, lambda, ux, uy, dt, dx, dy,
@@ -367,7 +378,7 @@ int main(int argc, char** argv) {
     free(local_C);
     MPI_Barrier(MPI_COMM_WORLD);
     //Reset
-    if (world_rank == 0) printf("Starting parallel PDE (async)\n");
+    if (world_rank == 0) printf("Starting parallel PDE (async)\n");       
     local_A = (double*)malloc(chunk * N * sizeof(double));
     local_C = (double*)malloc(chunk * N * sizeof(double));
     //Asyn
@@ -395,4 +406,3 @@ int main(int argc, char** argv) {
     MPI_Finalize();
     return 0;
 }
-

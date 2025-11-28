@@ -1,6 +1,7 @@
 #ifndef PDE_H
 #define PDE_H
 #include "mpi.h"
+#include "omp.h"
 #include <iostream>
 #include <numeric>
 #include <cstdlib>
