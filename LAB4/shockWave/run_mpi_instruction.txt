@@ -1,0 +1,91 @@
+Trong thí nghiệm này, toàn bộ hệ thống được triển khai và thực thi trên hạ tầng HPC do thầy Diệp Thanh Đăng cung cấp tại địa chỉ:
+
+https://gateway.hpcc.vn/
+
+Tài khoản truy cập sử dụng trong quá trình thực nghiệm:
+mpistudent / dm89qHPnBEd9.
+
+Hệ thống MPI bao gồm hai nút tính toán (compute nodes) được cấp quyền sử dụng:
+
+Node 7 – địa chỉ IP: 10.1.8.73
+
+Node 9 – địa chỉ IP: 10.1.8.75
+
+Trong đó, Node 7 được sử dụng làm nút master để thao tác chính như biên dịch chương trình, gửi file thực thi tới các node còn lại và khởi chạy quá trình tính toán phân tán.
+
+Quy trình thực nghiệm chi tiết
+1. Truy cập và chuẩn bị môi trường trên Node 7
+
+Sau khi đăng nhập vào hệ thống HPC, người dùng mở terminal và truy cập vào Node 7.
+Tại đây, mã nguồn thí nghiệm nằm trong thư mục:
+
+cd LAB4/ParCom_Lab/LAB4/
+
+
+Trong thư mục này chứa các tệp và thư mục phục vụ toàn bộ bài Lab 4:
+
+Parallel_Computing_Lab_4.pdf  
+heat/  
+radioactive/  
+shockwave/  
+hosts.txt
+
+
+Ba thư mục heat, radioactive và shockwave tương ứng với ba bài toán được cài đặt theo mô hình MPI phân tán.
+Để chạy bài toán nào, người dùng chỉ cần chuyển vào thư mục tương ứng.
+
+2. Cơ chế thực thi và cấu trúc Makefile
+
+Việc biên dịch và chạy chương trình được điều khiển thông qua các target trong file Makefile của mỗi bài.
+Ví dụ trong thư mục radioactive, các lệnh chính bao gồm:
+
+• Biên dịch chương trình
+make build
+
+
+Lệnh này biên dịch mã nguồn và tạo ra file thực thi trong thư mục hiện tại.
+
+• Gửi file thực thi sang các node
+
+Sau khi biên dịch, cần phân phối file binary sang các node khác để đảm bảo các tiến trình MPI có thể chạy đồng bộ.
+Việc này được thực hiện bằng script:
+
+./send_node.sh
+
+
+Script này sẽ tự động sao chép file thực thi sang đúng thư mục trên Node 9 (hoặc các node trong hosts.txt), giúp đảm bảo tính đồng nhất giữa các nút tính toán.
+
+• Chạy chương trình trên một máy (local MPI)
+make run
+
+
+Lệnh này chạy chương trình MPI nhưng chỉ trên duy nhất Node 7, thích hợp cho kiểm thử nhanh.
+
+• Chạy chương trình phân tán trên nhiều node
+make run_node
+
+
+Phiên bản này chạy MPI trên 2 node (Node 7 và Node 9), dựa trên cấu hình danh sách node trong file:
+
+hosts.txt
+
+
+File này quy định số tiến trình và địa chỉ node sẽ tham gia vào quá trình thực thi phân tán.
+
+3. Chu trình chỉnh sửa – biên dịch – triển khai
+
+Khi cần thay đổi mã nguồn, quy trình làm việc chuẩn gồm ba bước:
+
+Chỉnh sửa file .c hoặc .cpp trên Node 7.
+
+Biên dịch lại bằng lệnh:
+
+make build
+
+
+Phân phối lại file thực thi sang các node bằng:
+
+./send_node.sh
+
+
+Sau khi hoàn tất, người dùng có thể chạy lại chương trình bằng một trong hai chế độ: chạy local (make run) hoặc chạy phân tán qua các node (make run_node).

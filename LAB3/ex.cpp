@@ -41,6 +41,7 @@ private:
     std::mutex mtx;
     std::queue<Task*> queue;
     static TaskQueue* instance;
+    bool finished = false;
 
 public:
 
@@ -51,7 +52,10 @@ public:
 
     Task* dequeue() {
         std::lock_guard<std::mutex> lock(mtx);
-        if (queue.empty()) return nullptr;
+        if (queue.empty()) {
+            // printf("Dequeue empty\n");
+            return nullptr;
+        }
         Task* task = queue.front();
         queue.pop();
         return task;
@@ -62,6 +66,20 @@ public:
             instance = new TaskQueue();
         return instance;
     }
+
+    bool isEmpty() {
+        std::lock_guard<std::mutex> lock(mtx);
+        return queue.empty();
+    }
+
+    void setFinished() {
+        std::lock_guard<std::mutex> lock(mtx);
+        finished = true;
+    }
+    bool isFinished() {
+        std::lock_guard<std::mutex> lock(mtx);
+        return finished;
+    }
 };
 TaskQueue* TaskQueue::instance = nullptr;
 
@@ -70,36 +88,36 @@ private:
     bool stop;
     std::thread t;
     int id;
-
     void run() {
-        while (!stop) {
+        while (true) {
             Task* task = TaskQueue::get()->dequeue();
             if (task) {
                 printf("Worker %d executes task %d\n", this->id, task->id);
                 process(task);
                 delete task;
+            } else if (TaskQueue::get()->isFinished()) {
+                break;
             } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
     }
 
 public:
+    
     void process(Task* task) {
         int center = N / 2;
-
         double max_R = task->t * 343.0;
-        double max_cells = max_R / 10.0;
 
         for (int i = task->start_row; i <= task->end_row; ++i) {
+
             for (int j = 0; j < N; ++j) {
                 if (task->res[i*N + j] > 0) continue;
 
                 double dx = (i - center)*10.0;
                 double dy = (j - center)*10.0;
                 double R = std::sqrt(dx*dx + dy*dy);
-                if (R < 1e-9) continue;
-                if (R > max_R) continue;
+                if (R < 1e-9 || R > max_R) continue;
 
                 double Z = R * std::pow(task->W, -1.0/3.0);
                 double U = -0.21436 + 1.35034 * std::log10(Z);
@@ -113,13 +131,10 @@ public:
                 double Pso = std::pow(10.0, logPso);
                 task->res[i*N + j] = Pso;
                 task->A[i*N + j] = Pso;
-
-                // printf("Task %d: Pso at cell (%d,%d) = %.6f\n", task->id, i, j, Pso);
             }
-
         }
     }
-    Worker(int id) : id(id), stop(false) {
+    Worker(int id) : id(id), stop(false) { // khởi tạo vector với N mutex
         t = std::thread(&Worker::run, this);
     }
 
@@ -135,16 +150,12 @@ void sequential_shock_wave_blast(double *A, double *res, double W, double *C) {
     int center_y = N / 2;
 
     for (int t = 1; t <= SECONDS; ++t) {
-
         double max_R = t * 343.0;
-        double max_cells = max_R / 10.0;
-        if (max_cells > N/2) break;
-
-        int min_i = std::max(0, center_x - (int)max_cells);
-        int max_i = std::min(N-1, center_x + (int)max_cells);
-        int min_j = std::max(0, center_y - (int)max_cells);
-        int max_j = std::min(N-1, center_y + (int)max_cells);
-
+        int min_i = std::max(0, center_x - (int)(max_R/10));
+        int max_i = std::min(N-1, center_x + (int)(max_R/10));
+        int min_j = std::max(0, center_y - (int)(max_R/10));
+        int max_j = std::min(N-1, center_y + (int)(max_R/10));
+        // printf("I = %d\n", t);
         for (int i = min_i; i <= max_i; ++i) {
             for (int j = min_j; j <= max_j; ++j) {
                 if (res[i*N + j] > 0) continue;
@@ -195,13 +206,14 @@ int main() {
     // printf("Center Pso (sequential): %f kPa\n", res_seq[(N/2)*N + (N/2)]);
     printf("Time to sequential: %.6lf s\n", s1 - s0);
     // ---------------- Parallel execution ----------------
+    double p0 = omp_get_wtime();
     std::vector<Worker*> workers;
     for (int i = 0; i < NUM_THREAD; ++i)
         workers.push_back(new Worker(i));
 
     int taskid = 0;
     int center = N / 2;
-    double p0 = omp_get_wtime();
+    
     for (int t = 1; t <= SECONDS; ++t) {
         int max_R = t * 343;
         int min_i = std::max(0, center - max_R/10);
@@ -216,16 +228,20 @@ int main() {
         }
 
         if (has_cell) {
+            // printf("HAS CELL at t=%d \n", t);
             TaskQueue::get()->enqueue(new Task(taskid++, min_i, max_i, A_par, res_parallel, W, C, t));
         }
     }
-    double p1 = omp_get_wtime();
-
+    TaskQueue::get()->setFinished();
+    
+    // while (!TaskQueue::get()->isEmpty()) {
+    //     std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // }
     for (Worker* w : workers) {
         w->exit();
         delete w;
     }
-
+    double p1 = omp_get_wtime();
     // printf("Center Pso (parallel): %f kPa\n", res_parallel[(N/2)*N + (N/2)]);
     printf("Time to parallel: %.6lf s\n", p1 - p0);
     check_matrix_equal(res_seq, res_parallel, N);

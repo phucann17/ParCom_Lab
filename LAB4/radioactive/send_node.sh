@@ -1,24 +1,34 @@
 #!/bin/bash
 
-SRC_DIR="$HOME/ParCom/ParCom_Lab"
-DEST_USER="admin1"
-DEST_HOST="192.168.1.15"
-DEST_DIR="/home/admin1/ParCom/ParCom_Lab"
+# send_node.sh - chỉ copy đến MPI-node9 dùng scp
 
-echo "Copying $SRC_DIR → $DEST_USER@$DEST_HOST:$DEST_DIR"
-echo "Excluding: *.csv + all .git files"
-echo
 
-ssh ${DEST_USER}@${DEST_HOST} "mkdir -p ${DEST_DIR}"
+NODE="MPI-node9"
 
-rsync -av \
-    --exclude="*.csv" \
-    --exclude=".git/" \
-    --exclude=".git/**" \
-    --exclude=".gitignore" \
-    --exclude=".gitattributes" \
-    "${SRC_DIR}/" \
-    "${DEST_USER}@${DEST_HOST}:${DEST_DIR}/"
+SRC_DIR="/root/LAB4/ParCom_Lab/LAB4"
 
-echo
-echo "DONE!"
+DEST_DIR="/root/LAB4/ParCom_Lab/LAB4"
+
+
+echo "Copying to $NODE..."
+
+
+# Tạo thư mục đích nếu chưa tồn tại
+
+ssh root@"$NODE" "mkdir -p ${DEST_DIR}"
+cd "$SRC_DIR" || exit
+for dir in */ ; do
+    if [[ "$dir" != ".git/" ]]; then
+        scp -r "$dir" root@"$NODE":"$DEST_DIR/"
+    fi
+done
+
+
+for file in * ; do
+    if [[ -f "$file" && "$file" != *.csv && "$file" != ".gitignore" && "$file" != ".gitattributes" ]]; then
+        scp "$file" root@"$NODE":"$DEST_DIR/"
+    fi
+done
+
+
+echo "Done copying to $NODE."
